@@ -8,9 +8,10 @@ clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-colored = "2.0"
+colored = "2.2.0"
 confy = "0.6"  # For config file management
 anyhow = "1.0"  # For error handling
 rpassword = "7.2"  # For secure API key input
 uuid = { version = "1.10", features = ["v4"] }  # For generating UUIDs
-thiserror = "1.0"
+thiserror = "2.0.12" # for errors
+base64 = "0.22" # for base64 image format
