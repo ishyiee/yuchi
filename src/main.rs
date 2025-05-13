@@ -10,6 +10,8 @@ use rpassword::prompt_password;
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 
 // Hardcoded app_id for user auth token flow 
 const APP_ID: &str = "3718bde3-c803-4bfc-b41b-3b5f0aa0ddd8";
@@ -24,6 +26,8 @@ enum YuchiError {
     Tool(String),
     #[error("Invalid input: {0}")]
     Input(String),
+    #[error("Image processing error: {0}")]
+    Image(String),
 }
 
 // tool_schemas to run executable shell commands
@@ -90,7 +94,12 @@ fn run_tool(command: &str) -> Result<String, YuchiError> {
     after_help = "To authenticate, run `yuchi --login` and choose:\n\
                   - Option 1: Enter your ShapesAI API key.\n\
                   - Option 2: Use the built-in App ID, visit the authorization URL, and paste the one-time code.\n\
-                  Credentials are stored securely in a platform-appropriate config directory."
+                  Credentials are stored securely in a platform-appropriate config directory.\n\n\
+                  Utility commands:\n\
+                  - `--reset`: Reset the conversation history.\n\
+                  - `--wack`: Clear short-term memory.\n\
+                  - `--sleep`: Save the current conversation state as a memory.\n\
+                  - `--image <IMAGE_PATH>`: Describe the image (can be used alone or with a question)."
 )]
 struct Cli {
     /// Log in by setting an API key or user auth token
@@ -102,9 +111,21 @@ struct Cli {
     /// Clear the stored API key, app ID, auth token, username, user ID, and channel ID
     #[arg(long)]
     logout: bool,
+    /// Reset the conversation history
+    #[arg(long)]
+    reset: bool,
+    /// Clear short-term memory
+    #[arg(long)]
+    wack: bool,
+    /// Save the current conversation state as a memory
+    #[arg(long)]
+    sleep: bool,
     /// Temporarily override the model for this question
     #[arg(long, value_name = "MODEL")]
     model: Option<String>,
+    /// Path to an image file to include in the query
+    #[arg(long, value_name = "IMAGE_PATH")]
+    image: Option<String>,
     // prompt to the assistant
     #[arg(value_name = "QUESTION", trailing_var_arg = true, allow_hyphen_values = true)]
     question: Vec<String>,
@@ -146,9 +167,25 @@ fn run() -> Result<(), YuchiError> {
         return Ok(());
     }
 
+    if cli.reset {
+        return ask("!reset", cli.model.as_deref(), None);
+    }
+
+    if cli.wack {
+        return ask("!wack", cli.model.as_deref(), None);
+    }
+
+    if cli.sleep {
+        return ask("!sleep", cli.model.as_deref(), None);
+    }
+
+    if cli.image.is_some() && cli.question.is_empty() {
+        return ask("Describe this image", cli.model.as_deref(), cli.image.as_deref());
+    }
+
     if !cli.question.is_empty() {
         let question = cli.question.join(" ");
-        return ask(&question, cli.model.as_deref());
+        return ask(&question, cli.model.as_deref(), cli.image.as_deref());
     }
 
     println!("{}", "Error: No command or question provided. Try `yuchi --help`.".magenta());
@@ -200,7 +237,7 @@ fn login() -> Result<(), YuchiError> {
 
         let user_id = config.user_id.as_ref().unwrap();
         let channel_id = config.channel_id.as_ref().unwrap();
-        let test_response = ask_shapesai("Test", Some(&key), None, "shapesinc/ariwa", user_id, channel_id)?;
+        let test_response = ask_shapesai("Test", Some(&key), None, "shapesinc/ariwa", user_id, channel_id, None)?;
         if test_response.is_empty() {
             return Err(YuchiError::Api("API key validation failed: No response received".to_string()));
         }
@@ -273,7 +310,7 @@ fn login() -> Result<(), YuchiError> {
             .ok_or_else(|| YuchiError::Api("Missing auth_token in response".to_string()))?;
 
         // Test With Auth Token
-        let test_response = ask_shapesai("Test", None, Some(user_auth_token), "shapesinc/ariwa", user_id, channel_id)?;
+        let test_response = ask_shapesai("Test", None, Some(user_auth_token), "shapesinc/ariwa", user_id, channel_id, None)?;
         if test_response.is_empty() {
             return Err(YuchiError::Api("User auth token validation failed: No response received".to_string()));
         }
@@ -301,9 +338,9 @@ fn set_shape(username: &str) -> Result<(), YuchiError> {
 
     let model = format!("shapesinc/{}", username);
     let test_response = if let Some(user_auth_token) = &config.user_auth_token {
-        ask_shapesai("Test", None, Some(user_auth_token), &model, &user_id, &channel_id)?
+        ask_shapesai("Test", None, Some(user_auth_token), &model, &user_id, &channel_id, None)?
     } else if let Some(api_key) = &config.api_key {
-        ask_shapesai("Test", Some(api_key), None, &model, &user_id, &channel_id)?
+        ask_shapesai("Test", Some(api_key), None, &model, &user_id, &channel_id, None)?
     } else {
         return Err(YuchiError::Config("No API key or user auth token set. Run `yuchi --login` first.".to_string()));
     };
@@ -321,7 +358,7 @@ fn set_shape(username: &str) -> Result<(), YuchiError> {
     Ok(())
 }
 
-fn ask(question: &str, model_override: Option<&str>) -> Result<(), YuchiError> {
+fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str>) -> Result<(), YuchiError> {
     let config: Config = confy::load("yuchi", None)
         .map_err(|e| YuchiError::Config(e.to_string()))?;
     let user_id = config.user_id
@@ -337,9 +374,9 @@ fn ask(question: &str, model_override: Option<&str>) -> Result<(), YuchiError> {
     let model = model_override.unwrap_or(&default_model);
 
     let reply = if let Some(user_auth_token) = &config.user_auth_token {
-        ask_shapesai(question, None, Some(user_auth_token), &model, &user_id, &channel_id)?
+        ask_shapesai(question, None, Some(user_auth_token), &model, &user_id, &channel_id, image_path)?
     } else if let Some(api_key) = &config.api_key {
-        ask_shapesai(question, Some(api_key), None, &model, &user_id, &channel_id)?
+        ask_shapesai(question, Some(api_key), None, &model, &user_id, &channel_id, image_path)?
     } else {
         return Err(YuchiError::Config("No API key or user auth token set. Run `yuchi --login` first.".to_string()));
     };
@@ -352,12 +389,49 @@ fn ask(question: &str, model_override: Option<&str>) -> Result<(), YuchiError> {
     Ok(())
 }
 
-fn ask_shapesai(prompt: &str, api_key: Option<&str>, user_auth_token: Option<&str>, model: &str, user_id: &str, channel_id: &str) -> Result<String, YuchiError> {
+fn ask_shapesai(prompt: &str, api_key: Option<&str>, user_auth_token: Option<&str>, model: &str, user_id: &str, channel_id: &str, image_path: Option<&str>) -> Result<String, YuchiError> {
     let client = Client::new();
-    let mut messages = vec![json!({
-        "role": "user",
-        "content": prompt
-    })];
+    let mut messages = vec![];
+
+    // Adjust prompt for text extraction if "text" is in the prompt
+    let adjusted_prompt = if image_path.is_some() && prompt.to_lowercase().contains("text") {
+        format!("Extract the text from this image: {}", prompt)
+    } else {
+        prompt.to_string()
+    };
+
+    if let Some(image_path) = image_path {
+        let path = std::path::Path::new(image_path);
+        if !path.exists() || !path.is_file() {
+            return Err(YuchiError::Image(format!("Image file '{}' does not exist or is not a file", image_path)));
+        }
+
+        let image_data = fs::read(path)
+            .map_err(|e| YuchiError::Image(format!("Failed to read image file '{}': {}", image_path, e)))?;
+        let base64_image = BASE64.encode(&image_data);
+
+        // Guess MIME type based on extension (PNG or JPEG)
+        let mime_type = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            _ => return Err(YuchiError::Image(format!("Unsupported image format for '{}'. Use PNG or JPEG.", image_path))),
+        };
+
+        let image_url = format!("data:{};base64,{}", mime_type, base64_image);
+
+        messages.push(json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": adjusted_prompt },
+                { "type": "image_url", "image_url": { "url": image_url } }
+            ]
+        }));
+    } else {
+        messages.push(json!({
+            "role": "user",
+            "content": adjusted_prompt
+        }));
+    }
 
     let mut request_builder = client.post("https://api.shapes.inc/v1/chat/completions");
 
