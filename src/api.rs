@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::errors::YuchiError;
+use crate::commands::run_tool;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -102,6 +103,91 @@ pub fn ask_shapesai(
     let json: Value = res.json()
         .map_err(|e| YuchiError::Api(format!("Failed to parse API response: {}", e)))?;
 
+    let tool_calls = json
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(|tool_calls| tool_calls.as_array());
+
+    if let Some(tool_calls) = tool_calls {
+        messages.push(json!({
+            "role": "assistant",
+            "tool_calls": tool_calls
+        }));
+
+        for tool_call in tool_calls {
+            let tool_call_id = tool_call.get("id")
+                .and_then(|id| id.as_str())
+                .ok_or_else(|| YuchiError::Api("Missing tool call ID".to_string()))?;
+            let arguments = tool_call
+                .get("function")
+                .and_then(|f| f.get("arguments"))
+                .ok_or_else(|| YuchiError::Api("Missing tool arguments".to_string()))?;
+            let args_str = arguments.as_str()
+                .ok_or_else(|| YuchiError::Api("Tool arguments must be a JSON string".to_string()))?;
+            let args: serde_json::Map<String, Value> = serde_json::from_str(args_str)
+                .map_err(|e| YuchiError::Api(format!("Failed to parse tool arguments: {}", e)))?;
+            let command = args
+                .get("command")
+                .and_then(|c| c.as_str())
+                .ok_or_else(|| YuchiError::Api("Missing command parameter".to_string()))?;
+
+            run_tool(command)?; // Updated: No longer assigns result
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": format!("Executed command: {}", command)
+            }));
+        }
+
+        let mut second_request = client.post("https://api.shapes.inc/v1/chat/completions");
+
+        if let Some(user_auth_token) = user_auth_token {
+            let app_id = Config::load()?.app_id
+                .ok_or_else(|| YuchiError::Config("No app ID set for user auth token.".to_string()))?;
+            second_request = second_request
+                .header("X-App-ID", app_id)
+                .header("X-User-Auth", user_auth_token);
+        } else if let Some(api_key) = api_key {
+            second_request = second_request
+                .header("X-User-ID", user_id)
+                .header("X-Channel-ID", channel_id)
+                .header("Authorization", format!("Bearer {}", api_key));
+        } else {
+            return Err(YuchiError::Api("No API key or user auth token provided.".to_string()));
+        }
+
+        second_request = second_request.json(&json!({
+            "model": model,
+            "messages": messages,
+            "tool_choice": "none"
+        }));
+
+        let second_res = second_request
+            .send()
+            .map_err(|e| YuchiError::Api(format!("Failed to send second request to ShapesAI API: {}", e)))?;
+
+        if !second_res.status().is_success() {
+            let status = second_res.status();
+            let error_body = second_res.text().unwrap_or_else(|_| "No response body".to_string());
+            return Err(YuchiError::Api(format!("Second API request failed with status: {}. Response: {}", status, error_body)));
+        }
+
+        let second_json: Value = second_res.json()
+            .map_err(|e| YuchiError::Api(format!("Failed to parse second API response: {}", e)))?;
+        let reply = second_json
+            .get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .unwrap_or("No response from tool execution.")
+            .to_string();
+
+        return Ok(reply);
+    }
+
     let content = json
         .get("choices")
         .and_then(|choices| choices.get(0))
@@ -109,6 +195,66 @@ pub fn ask_shapesai(
         .and_then(|message| message.get("content"))
         .and_then(|content| content.as_str())
         .unwrap_or("");
+
+    if content.starts_with("<function>") && content.ends_with("</function>") {
+        let command = content
+            .strip_prefix("<function>")
+            .and_then(|s| s.strip_suffix("</function>"))
+            .ok_or_else(|| YuchiError::Api("Invalid function tag format".to_string()))?;
+
+        run_tool(command)?; // Updated: No longer assigns result
+        messages.push(json!({
+            "role": "tool",
+            "tool_call_id": "fallback",
+            "content": format!("Executed command: {}", command)
+        }));
+
+        let mut second_request = client.post("https://api.shapes.inc/v1/chat/completions");
+
+        if let Some(user_auth_token) = user_auth_token {
+            let app_id = Config::load()?.app_id
+                .ok_or_else(|| YuchiError::Config("No app ID set for user auth token.".to_string()))?;
+            second_request = second_request
+                .header("X-App-ID", app_id)
+                .header("X-User-Auth", user_auth_token);
+        } else if let Some(api_key) = api_key {
+            second_request = second_request
+                .header("X-User-ID", user_id)
+                .header("X-Channel-ID", channel_id)
+                .header("Authorization", format!("Bearer {}", api_key));
+        } else {
+            return Err(YuchiError::Api("No API key or user auth token provided.".to_string()));
+        }
+
+        second_request = second_request.json(&json!({
+            "model": model,
+            "messages": messages,
+            "tool_choice": "none"
+        }));
+
+        let second_res = second_request
+            .send()
+            .map_err(|e| YuchiError::Api(format!("Failed to send second request to ShapesAI API: {}", e)))?;
+
+        if !second_res.status().is_success() {
+            let status = second_res.status();
+            let error_body = second_res.text().unwrap_or_else(|_| "No response body".to_string());
+            return Err(YuchiError::Api(format!("Second API request failed with status: {}. Response: {}", status, error_body)));
+        }
+
+        let second_json: Value = second_res.json()
+            .map_err(|e| YuchiError::Api(format!("Failed to parse second API response: {}", e)))?;
+        let reply = second_json
+            .get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .unwrap_or("No response from tool execution.")
+            .to_string();
+
+        return Ok(reply);
+    }
 
     Ok(content.to_string())
 }

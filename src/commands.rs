@@ -7,6 +7,7 @@ use serde_json::json;
 use uuid::Uuid;
 use rpassword::prompt_password;
 use std::process::Command;
+use colored::Colorize;
 
 pub fn login() -> Result<(), YuchiError> {
     let mut config = Config::load()?;
@@ -36,7 +37,7 @@ pub fn login() -> Result<(), YuchiError> {
         let channel_id = config.channel_id.as_ref().unwrap();
         let pb = display_progress();
         let test_response = ask_shapesai("Test", Some(&key), None, "shapesinc/ariwa", user_id, channel_id, None)?;
-        pb.finish_with_message("Done");
+        pb.finish_and_clear(); // Updated: Clear spinner silently
 
         if test_response.is_empty() {
             return Err(YuchiError::Api("API key validation failed: No response received".to_string()));
@@ -65,7 +66,7 @@ pub fn login() -> Result<(), YuchiError> {
         let channel_id = config.channel_id.as_ref().unwrap();
 
         println!("{}", "Click on the link to authorize the application:".yellow());
-        println!("{}", format!("https://shapes.inc/authorize?app_id={}", APP_ID).blue());
+        println!("{}", format!("https://shapes.inc/authorize?app_id={}", APP_ID).as_str().blue());
         println!("\nAfter logging in to ShapesAI and approving the authorization request,");
         println!("you will be given a one-time code. Copy and paste that code here.");
 
@@ -87,7 +88,7 @@ pub fn login() -> Result<(), YuchiError> {
             .map_err(|e| YuchiError::Api(format!("Failed to exchange one-time code: {}", e)))?;
 
         if !response.status().is_success() {
-            pb.finish_with_message("Failed");
+            pb.finish_and_clear(); // Updated: Clear spinner silently
             let status = response.status();
             let error_body = response.text().unwrap_or_else(|_| "No response body".to_string());
             return Err(YuchiError::Api(format!("Failed to exchange one-time code with status: {}. Response: {}", status, error_body)));
@@ -101,7 +102,7 @@ pub fn login() -> Result<(), YuchiError> {
             .ok_or_else(|| YuchiError::Api("Missing auth_token in response".to_string()))?;
 
         let test_response = ask_shapesai("Test", None, Some(user_auth_token), "shapesinc/ariwa", user_id, channel_id, None)?;
-        pb.finish_with_message("Done");
+        pb.finish_and_clear(); // Updated: Clear spinner silently
 
         if test_response.is_empty() {
             return Err(YuchiError::Api("User auth token validation failed: No response received".to_string()));
@@ -134,7 +135,7 @@ pub fn set_shape(username: &str) -> Result<(), YuchiError> {
     } else {
         return Err(YuchiError::Config("No API key or user auth token set. Run `yuchi --login` first.".to_string()));
     };
-    pb.finish_with_message("Done");
+    pb.finish_and_clear(); // Updated: Clear spinner silently
 
     if test_response.is_empty() {
         return Err(YuchiError::Api("Username validation failed: No response received.".to_string()));
@@ -143,7 +144,7 @@ pub fn set_shape(username: &str) -> Result<(), YuchiError> {
     let mut config = Config::load()?;
     config.username = Some(username.to_string());
     config.save()?;
-    println!("{}", format!("Username '{}' validated and saved successfully! Using model: {}", username, model).green());
+    println!("{}", format!("Username '{}' validated and saved successfully! Using model: {}", username, model).as_str().green());
     Ok(())
 }
 
@@ -176,13 +177,13 @@ pub fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str
     } else {
         return Err(YuchiError::Config("No API key or user auth token set. Run `yuchi --login` first.".to_string()));
     };
-    pb.finish_with_message("Done");
+    pb.finish_and_clear(); // Updated: Clear spinner silently
 
     display_response(question, &reply);
     Ok(())
 }
 
-pub fn run_tool(command: &str) -> Result<String, YuchiError> {
+pub fn run_tool(command: &str) -> Result<(), YuchiError> {
     let current_dir = std::env::current_dir()
         .map_err(|e| YuchiError::Tool(e.to_string()))?
         .to_string_lossy()
@@ -192,7 +193,8 @@ pub fn run_tool(command: &str) -> Result<String, YuchiError> {
     let confirmation = prompt_password(format!("Run `{}` in {}? (y/n): ", command, current_dir))
         .map_err(|e| YuchiError::Input(e.to_string()))?;
     if confirmation.trim().to_lowercase() != "y" {
-        return Ok("Command execution cancelled by user.".to_string());
+        display_command_result(command, "Command execution cancelled by user.");
+        return Ok(());
     }
 
     let parts: Vec<&str> = command.split_whitespace().collect();
@@ -216,5 +218,5 @@ pub fn run_tool(command: &str) -> Result<String, YuchiError> {
     };
 
     display_command_result(command, &result);
-    Ok(result)
+    Ok(())
 }

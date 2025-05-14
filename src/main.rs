@@ -4,14 +4,14 @@ mod config;
 mod commands;
 mod errors;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use errors::YuchiError;
 
 #[derive(Parser)]
 #[command(
     name = "yuchi",
     about = "A CLI assistant powered by ShapesAI",
-    version = "0.1.0",
+    version = "0.2.0",
     after_help = "To authenticate, run `yuchi --login` and choose:\n\
                   - Option 1: Enter your ShapesAI API key.\n\
                   - Option 2: Use the built-in App ID, visit the authorization URL, and paste the one-time code.\n\
@@ -21,7 +21,8 @@ use errors::YuchiError;
                   - `--image <PATH>`: Process an image (standalone or with question)\n\
                   - `--reset`: Reset conversation history\n\
                   - `--wack`: Clear short-term memory\n\
-                  - `--sleep`: Save conversation state\n\n\
+                  - `--sleep`: Save conversation state\n\
+                  - `run <COMMAND>`: Execute a shell command\n\n\
                   Examples:\n\
                   yuchi \"What's the weather?\"\n\
                   yuchi --image meme.jpg \"What's the text?\"\n\
@@ -52,9 +53,22 @@ struct Cli {
     /// Path to an image file
     #[arg(long, value_name = "IMAGE_PATH")]
     image: Option<String>,
-    /// Prompt or command for the assistant
+    /// Subcommands
+    #[command(subcommand)]
+    command: Option<Commands>,
+    /// Prompt for the assistant (if no subcommand)
     #[arg(value_name = "QUESTION", trailing_var_arg = true, allow_hyphen_values = true)]
     question: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a shell command
+    Run {
+        /// The shell command to execute
+        #[arg(value_name = "COMMAND")]
+        command: Vec<String>,
+    },
 }
 
 fn main() {
@@ -89,6 +103,15 @@ fn run() -> Result<(), YuchiError> {
 
     if cli.sleep {
         return commands::ask("!sleep", cli.model.as_deref(), None);
+    }
+
+    if let Some(command) = cli.command {
+        match command {
+            Commands::Run { command } => {
+                let command_str = command.join(" ");
+                return commands::run_tool(&command_str);
+            }
+        }
     }
 
     if cli.image.is_some() && cli.question.is_empty() {
