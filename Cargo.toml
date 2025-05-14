@@ -15,3 +15,5 @@ rpassword = "7.2"  # For secure API key input
 uuid = { version = "1.10", features = ["v4"] }  # For generating UUIDs
 thiserror = "2.0.12" # for errors
 base64 = "0.22" # for base64 image format
+indicatif = "0.17.8" # For progress spinner
+prettytable = "0.10.0" # For command output tables
