@@ -4,7 +4,7 @@ use prettytable::{Table, Row, Cell};
 use crate::errors::YuchiError;
 
 pub fn display_help() {
-    println!("{}", "=== Yuchi CLI v0.1.0 ===".bold().cyan());
+    println!("{}", "=== Yuchi CLI v0.2.0 ===".bold().cyan());
     println!("A command-line assistant powered by ShapesAI.");
     println!("\nUsage: yuchi [OPTIONS] [QUESTION]");
     println!("\nOptions:");
