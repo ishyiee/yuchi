@@ -202,6 +202,7 @@ pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool
         .to_string_lossy()
         .into_owned();
 
+    // Prompting User for Safety (no spinner during prompt)
     let confirmation = prompt_password(format!("Run `{}` in {}? (y/n): ", command, current_dir))
         .map_err(|e| YuchiError::Input(e.to_string()))?;
     if confirmation.trim().to_lowercase() != "y" {
@@ -210,6 +211,7 @@ pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool
         return Ok((result, false));
     }
 
+    // Start spinner after confirmation
     let pb = pb.map(|p| p.clone()).unwrap_or_else(|| display_progress());
 
     let parts: Vec<&str> = command.split_whitespace().collect();

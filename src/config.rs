@@ -1,8 +1,6 @@
 use crate::errors::YuchiError;
 use serde::{Deserialize, Serialize};
-use confy;
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use confy::ConfyError;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Config {
@@ -16,28 +14,12 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self, YuchiError> {
-        let config: Config = confy::load("yuchi", None)
-            .map_err(|e| YuchiError::Config(e.to_string()))?;
-
-        // Set permissions on config file (Unix-only)
-        #[cfg(unix)]
-        {
-            let config_path = confy::get_configuration_file_path("yuchi", None)
-                .map_err(|e| YuchiError::Config(e.to_string()))?;
-            if config_path.exists() {
-                fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
-                    .map_err(|e| YuchiError::Config(format!("Failed to set config permissions: {}", e)))?;
-            }
-        }
-        #[cfg(not(unix))]
-        println!("{}", "Note: Config file permissions not modified on non-Unix systems.".yellow());
-
-        Ok(config)
+        confy::load("yuchi", "config")
+            .map_err(|e| YuchiError::Config(format!("Failed to load config: {}", e)))
     }
 
     pub fn save(&self) -> Result<(), YuchiError> {
-        confy::store("yuchi", None, self)
-            .map_err(|e| YuchiError::Config(e.to_string()))?;
-        Ok(())
+        confy::store("yuchi", "config", self)
+            .map_err(|e| YuchiError::Config(format!("Failed to save config: {}", e)))
     }
 }

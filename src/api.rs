@@ -5,9 +5,9 @@ use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use indicatif::ProgressBar;
 use std::fs;
 
-// Hardcoded app_id for user auth token flow
 pub const APP_ID: &str = "3718bde3-c803-4bfc-b41b-3b5f0aa0ddd8";
 
 pub fn ask_shapesai(
@@ -18,11 +18,11 @@ pub fn ask_shapesai(
     user_id: &str,
     channel_id: &str,
     image_path: Option<&str>,
+    pb: Option<&ProgressBar>,
 ) -> Result<String, YuchiError> {
     let client = Client::new();
     let mut messages = vec![];
 
-    // Adjust prompt for text extraction if "text" is in the prompt
     let adjusted_prompt = if image_path.is_some() && prompt.to_lowercase().contains("text") {
         format!("Extract the text from this image: {}", prompt)
     } else {
@@ -133,11 +133,11 @@ pub fn ask_shapesai(
                 .and_then(|c| c.as_str())
                 .ok_or_else(|| YuchiError::Api("Missing command parameter".to_string()))?;
 
-            run_tool(command)?; // Updated: No longer assigns result
+            let (tool_result, _success) = run_tool(command, pb)?;
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": format!("Executed command: {}", command)
+                "content": tool_result
             }));
         }
 
@@ -202,11 +202,11 @@ pub fn ask_shapesai(
             .and_then(|s| s.strip_suffix("</function>"))
             .ok_or_else(|| YuchiError::Api("Invalid function tag format".to_string()))?;
 
-        run_tool(command)?; // Updated: No longer assigns result
+        let (tool_result, _success) = run_tool(command, pb)?;
         messages.push(json!({
             "role": "tool",
             "tool_call_id": "fallback",
-            "content": format!("Executed command: {}", command)
+            "content": tool_result
         }));
 
         let mut second_request = client.post("https://api.shapes.inc/v1/chat/completions");
@@ -259,19 +259,18 @@ pub fn ask_shapesai(
     Ok(content.to_string())
 }
 
-// tool_schemas to run executable shell commands
 fn tool_schemas() -> Vec<Value> {
     vec![json!({
         "type": "function",
         "function": {
             "name": "run_shell_command",
-            "description": "Run a shell command in the current directory",
+            "description": "Run a shell command in the current directory and return its output",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to run (e.g., npm install express)"
+                        "description": "The shell command to run (e.g., node -v)"
                     }
                 },
                 "required": ["command"]
