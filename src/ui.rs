@@ -16,15 +16,13 @@ pub fn display_help() {
     println!("  --sleep                  Save the current conversation state");
     println!("  --model <MODEL>          Override the model for this question");
     println!("  --image <IMAGE_PATH>     Path to an image file (PNG/JPEG) to send to the AI");
-    println!("  --run <COMMAND>          Run a shell command");
     println!("  --imagine                Generate an image via AI and download it (appends '!imagine' to the prompt)");
     println!("\nNote: Multi-word questions can be entered without quotes (e.g., yuchi hows you)");
     println!("\nExamples:");
     println!("  yuchi hi");
     println!("  yuchi hows you");
-    println!("  yuchi --imagine an anime girl");
+    println!("  yuchi --imagine a train station");
     println!("  yuchi --image meme.jpg What's the text?");
-    println!("  yuchi --run ls");
     println!("\nRun `yuchi --login` to authenticate first.");
 }
 
