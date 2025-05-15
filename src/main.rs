@@ -1,15 +1,17 @@
+mod api;
+mod commands;
+mod config;
+mod errors;
+mod ui;
+
 use clap::Parser;
-use crate::commands::Commands;
 use crate::errors::YuchiError;
 use crate::ui::{display_error, display_help};
 
 #[derive(Parser)]
 #[command(version = "0.2.0", about = "Yuchi CLI - A command-line assistant powered by ShapesAI")]
 struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    /// Path to an image file (PNG/JPEG)
+    /// Path to an image file (PNG/JPEG) to send to the AI
     #[arg(long, value_name = "IMAGE_PATH")]
     image: Option<String>,
 
@@ -17,11 +19,11 @@ struct Cli {
     #[arg(long, value_name = "MODEL")]
     model: Option<String>,
 
-    /// Reset the conversation history
+    /// Reset the AI conversation history (sends '!reset' to the AI)
     #[arg(long)]
     reset: bool,
 
-    /// Clear short-term memory
+    /// Clear the AI's short-term memory (sends '!wack' to the AI)
     #[arg(long)]
     wack: bool,
 
@@ -29,9 +31,29 @@ struct Cli {
     #[arg(long)]
     sleep: bool,
 
+    /// Authenticate with ShapesAI
+    #[arg(long)]
+    login: bool,
+
+    /// Clear stored credentials and configuration
+    #[arg(long)]
+    logout: bool,
+
+    /// Set a ShapesAI username to use a custom model (shapesinc/<username>)
+    #[arg(long, value_name = "USERNAME")]
+    shape: Option<String>,
+
+    /// Run a shell command
+    #[arg(long, value_name = "COMMAND")]
+    run: Option<String>,
+
+    /// Generate an image and download it (appends '!imagine' to the prompt)
+    #[arg(long)]
+    imagine: bool,
+
     /// Question to ask
     #[arg(value_name = "QUESTION")]
-    question: Option<String>,
+    question: Vec<String>,
 }
 
 fn main() {
@@ -44,41 +66,52 @@ fn main() {
 fn run() -> Result<(), YuchiError> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Some(Commands::Login) => {
-            Commands::login()?;
-        }
-        Some(Commands::Shape { username }) => {
-            Commands::set_shape(&username)?;
-        }
-        Some(Commands::Logout) => {
-            Commands::logout()?;
-        }
-        Some(Commands::Run { command }) => {
-            let command_str = command.join(" ");
-            let (_result, _success) = Commands::run_tool(&command_str, None)?;
-            return Ok(());
-        }
-        None => {
-            if cli.reset {
-                println!("Resetting conversation history...");
-                return Ok(());
-            }
-            if cli.wack {
-                println!("Clearing short-term memory...");
-                return Ok(());
-            }
-            if cli.sleep {
-                println!("Saving conversation state...");
-                return Ok(());
-            }
+    // Handle non-AI flags
+    if cli.login {
+        commands::login()?;
+        return Ok(());
+    }
+    if cli.logout {
+        commands::logout()?;
+        return Ok(());
+    }
+    if let Some(username) = cli.shape {
+        commands::set_shape(&username)?;
+        return Ok(());
+    }
+    if let Some(command) = cli.run {
+        let (_result, _success) = commands::run_tool(&command, None)?;
+        return Ok(());
+    }
+    if cli.sleep {
+        println!("Saving conversation state...");
+        return Ok(());
+    }
 
-            if let Some(question) = cli.question {
-                Commands::ask(&question, cli.model.as_deref(), cli.image.as_deref())?;
-            } else {
-                display_help();
-            }
-        }
+    // Handle AI-related flags and question
+    let mut prompt = if !cli.question.is_empty() {
+        cli.question.join(" ")
+    } else {
+        String::new()
+    };
+
+    if cli.imagine {
+        prompt = if prompt.is_empty() {
+            "!imagine".to_string()
+        } else {
+            format!("{} !imagine", prompt)
+        };
+        let response = commands::ask(&prompt, cli.model.as_deref(), cli.image.as_deref())?;
+        // Assume the response contains an image URL (adjust based on actual API response format)
+        commands::download_image(&response)?;
+    } else if cli.reset {
+        commands::ask("!reset", cli.model.as_deref(), None)?;
+    } else if cli.wack {
+        commands::ask("!wack", cli.model.as_deref(), None)?;
+    } else if !prompt.is_empty() {
+        commands::ask(&prompt, cli.model.as_deref(), cli.image.as_deref())?;
+    } else {
+        display_help();
     }
 
     Ok(())

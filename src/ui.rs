@@ -6,21 +6,25 @@ use crate::errors::YuchiError;
 pub fn display_help() {
     println!("{}", "=== Yuchi CLI v0.2.0 ===".bold().cyan());
     println!("A command-line assistant powered by ShapesAI.");
-    println!("\nUsage: yuchi [OPTIONS] [QUESTION]");
+    println!("\nUsage: yuchi [OPTIONS] [QUESTION...]");
     println!("\nOptions:");
     println!("  --login                  Authenticate with ShapesAI (API key or user auth token)");
     println!("  --shape <USERNAME>       Set a ShapesAI username to use a custom model (shapesinc/<username>)");
     println!("  --logout                 Clear stored credentials and configuration");
-    println!("  --reset                  Reset the conversation history");
-    println!("  --wack                   Clear short-term memory");
+    println!("  --reset                  Reset the AI conversation history (sends '!reset' to AI)");
+    println!("  --wack                   Clear the AI's short-term memory (sends '!wack' to AI)");
     println!("  --sleep                  Save the current conversation state");
     println!("  --model <MODEL>          Override the model for this question");
-    println!("  --image <IMAGE_PATH>     Path to an image file (PNG/JPEG)");
-    println!("  run <COMMAND>            Run a shell command");
+    println!("  --image <IMAGE_PATH>     Path to an image file (PNG/JPEG) to send to the AI");
+    println!("  --run <COMMAND>          Run a shell command");
+    println!("  --imagine                Generate an image via AI and download it (appends '!imagine' to the prompt)");
+    println!("\nNote: Multi-word questions can be entered without quotes (e.g., yuchi hows you)");
     println!("\nExamples:");
-    println!("  yuchi \"What's the weather?\"");
-    println!("  yuchi --image meme.jpg \"What's the text?\"");
-    println!("  yuchi run ls");
+    println!("  yuchi hi");
+    println!("  yuchi hows you");
+    println!("  yuchi --imagine an anime girl");
+    println!("  yuchi --image meme.jpg What's the text?");
+    println!("  yuchi --run ls");
     println!("\nRun `yuchi --login` to authenticate first.");
 }
 

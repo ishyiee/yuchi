@@ -1,6 +1,5 @@
 use crate::errors::YuchiError;
 use serde::{Deserialize, Serialize};
-use confy::ConfyError;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Config {

@@ -9,18 +9,10 @@ use uuid::Uuid;
 use rpassword::prompt_password;
 use std::process::Command;
 use colored::Colorize;
-
-#[derive(clap::Subcommand)]
-pub enum Commands {
-    /// Authenticate with ShapesAI (API key or user auth token)
-    Login,
-    /// Set a ShapesAI username to use a custom model (shapesinc/<username>)
-    Shape { username: String },
-    /// Clear stored credentials and configuration
-    Logout,
-    /// Run a shell command
-    Run { command: Vec<String> },
-}
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+use regex::Regex;
 
 pub fn login() -> Result<(), YuchiError> {
     let mut config = Config::load()?;
@@ -168,7 +160,7 @@ pub fn logout() -> Result<(), YuchiError> {
     Ok(())
 }
 
-pub fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str>) -> Result<(), YuchiError> {
+pub fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str>) -> Result<String, YuchiError> {
     let config = Config::load()?;
     let user_id = config.user_id
         .ok_or_else(|| YuchiError::Config("No user ID set. Run `yuchi --login` first.".to_string()))?;
@@ -193,7 +185,7 @@ pub fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str
     pb.finish_and_clear();
 
     display_response(question, &reply);
-    Ok(())
+    Ok(reply)
 }
 
 pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool), YuchiError> {
@@ -237,4 +229,47 @@ pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool
     pb.finish_and_clear();
 
     Ok((result, success))
+}
+
+pub fn download_image(response: &str) -> Result<(), YuchiError> {
+    // Use regex to find a URL in the response
+    let re = Regex::new(r"https://files\.shapes\.inc/[^\s]+")
+        .map_err(|e| YuchiError::Api(format!("Failed to compile regex: {}", e)))?;
+    let url = re
+        .find(response)
+        .map(|m| m.as_str())
+        .ok_or_else(|| YuchiError::Api("No valid image URL found in response".to_string()))?;
+
+    let client = Client::new();
+    let pb = display_progress();
+    pb.set_message("Downloading image...");
+
+    let res = client
+        .get(url)
+        .send()
+        .map_err(|e| YuchiError::Api(format!("Failed to download image: {}", e)))?;
+
+    if !res.status().is_success() {
+        pb.finish_and_clear();
+        return Err(YuchiError::Api(format!("Failed to download image, status: {}", res.status())));
+    }
+
+    let bytes = res
+        .bytes()
+        .map_err(|e| YuchiError::Api(format!("Failed to read image bytes: {}", e)))?;
+
+    // Generate a unique filename using UUID
+    let filename = format!("/sdcard/yuchi_image_{}.png", Uuid::new_v4());
+    let path = Path::new(&filename);
+
+    let mut file = File::create(path)
+        .map_err(|e| YuchiError::Api(format!("Failed to create file '{}': {}", filename, e)))?;
+
+    file.write_all(&bytes)
+        .map_err(|e| YuchiError::Api(format!("Failed to write image to '{}': {}", filename, e)))?;
+
+    pb.finish_and_clear();
+    println!("{}", format!("Image saved as '{}'", filename).green());
+
+    Ok(())
 }
