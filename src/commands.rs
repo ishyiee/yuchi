@@ -10,7 +10,7 @@ use rpassword::prompt_password;
 use std::process::Command;
 use colored::Colorize;
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 use regex::Regex;
 
@@ -188,18 +188,27 @@ pub fn ask(question: &str, model_override: Option<&str>, image_path: Option<&str
     Ok(reply)
 }
 
-pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool), YuchiError> {
+pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<String, YuchiError> {
     let current_dir = std::env::current_dir()
         .map_err(|e| YuchiError::Tool(e.to_string()))?
         .to_string_lossy()
         .into_owned();
 
-    let confirmation = prompt_password(format!("Run `{}` in {}? (y/n): ", command, current_dir))
-        .map_err(|e| YuchiError::Input(e.to_string()))?;
-    if confirmation.trim().to_lowercase() != "y" {
+    // Print prompt with newline and flush to ensure visibility
+    println!("Run `{}` in {}? (y/n): ", command, current_dir);
+    io::stdout().flush().map_err(|e| YuchiError::Input(format!("Failed to flush stdout: {}", e)))?;
+
+    // Read a single line from stdin
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| YuchiError::Input(format!("Failed to read input: {}", e)))?;
+
+    let confirmation = input.trim().to_lowercase();
+    if confirmation != "y" {
         let result = "Command execution cancelled by user.".to_string();
         display_command_result(command, &result);
-        return Ok((result, false));
+        return Ok(result);
     }
 
     let pb = pb.map(|p| p.clone()).unwrap_or_else(|| display_progress());
@@ -217,9 +226,8 @@ pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let success = output.status.success();
 
-    let result = if success {
+    let result = if output.status.success() {
         format!("`{}` succeeded:\n{}", command, stdout)
     } else {
         format!("`{}` failed:\n{}", command, stderr)
@@ -228,11 +236,10 @@ pub fn run_tool(command: &str, pb: Option<&ProgressBar>) -> Result<(String, bool
     display_command_result(command, &result);
     pb.finish_and_clear();
 
-    Ok((result, success))
+    Ok(result)
 }
 
 pub fn download_image(response: &str) -> Result<(), YuchiError> {
-    // Use regex to find a URL in the response
     let re = Regex::new(r"https://files\.shapes\.inc/[^\s]+")
         .map_err(|e| YuchiError::Api(format!("Failed to compile regex: {}", e)))?;
     let url = re
@@ -258,7 +265,6 @@ pub fn download_image(response: &str) -> Result<(), YuchiError> {
         .bytes()
         .map_err(|e| YuchiError::Api(format!("Failed to read image bytes: {}", e)))?;
 
-    // Generate a unique filename using UUID
     let filename = format!("/sdcard/yuchi_image_{}.png", Uuid::new_v4());
     let path = Path::new(&filename);
 

@@ -19,11 +19,11 @@ struct Cli {
     #[arg(long, value_name = "MODEL")]
     model: Option<String>,
 
-    /// Reset the AI conversation history (sends '!reset' to the AI)
+    /// Reset the AI conversation history (sends '!reset' to AI)
     #[arg(long)]
     reset: bool,
 
-    /// Clear the AI's short-term memory (sends '!wack' to the AI)
+    /// Clear the AI's short-term memory (sends '!wack' to AI)
     #[arg(long)]
     wack: bool,
 
@@ -42,10 +42,6 @@ struct Cli {
     /// Set a ShapesAI username to use a custom model (shapesinc/<username>)
     #[arg(long, value_name = "USERNAME")]
     shape: Option<String>,
-
-    /// Run a shell command
-    #[arg(long, value_name = "COMMAND")]
-    run: Option<String>,
 
     /// Generate an image and download it (appends '!imagine' to the prompt)
     #[arg(long)]
@@ -79,30 +75,25 @@ fn run() -> Result<(), YuchiError> {
         commands::set_shape(&username)?;
         return Ok(());
     }
-    if let Some(command) = cli.run {
-        let (_result, _success) = commands::run_tool(&command, None)?;
-        return Ok(());
-    }
     if cli.sleep {
         println!("Saving conversation state...");
         return Ok(());
     }
 
     // Handle AI-related flags and question
-    let mut prompt = if !cli.question.is_empty() {
+    let prompt = if !cli.question.is_empty() {
         cli.question.join(" ")
     } else {
         String::new()
     };
 
     if cli.imagine {
-        prompt = if prompt.is_empty() {
+        let final_prompt = if prompt.is_empty() {
             "!imagine".to_string()
         } else {
             format!("{} !imagine", prompt)
         };
-        let response = commands::ask(&prompt, cli.model.as_deref(), cli.image.as_deref())?;
-        // Assume the response contains an image URL (adjust based on actual API response format)
+        let response = commands::ask(&final_prompt, cli.model.as_deref(), cli.image.as_deref())?;
         commands::download_image(&response)?;
     } else if cli.reset {
         commands::ask("!reset", cli.model.as_deref(), None)?;
